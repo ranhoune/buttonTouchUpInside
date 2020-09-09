@@ -1,10 +1,4 @@
-//
-//  UIButton+YLBButtonTool.m
-//  YiErBao
-//
-//  Created by iOS on 2020/9/9.
-//  Copyright © 2020 YiErBao. All rights reserved.
-//
+
 
 #import "UIButton+YLBButtonTool.h"
 #import <objc/runtime.h>
