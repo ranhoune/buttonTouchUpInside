@@ -9,77 +9,80 @@
 #import "UIButton+YLBButtonTool.h"
 #import <objc/runtime.h>
 
-// 默认的按钮点击时间
-static const NSTimeInterval defaultDuration = 0.5f;
+@interface UIButton ()
 
-// 记录是否忽略按钮点击事件，默认第一次执行事件
-static BOOL _isIgnoreEvent = NO;
+/**bool 类型 YES 不允许点击   NO 允许点击   设置是否执行点UI方法*/
+@property (nonatomic, assign) BOOL isIgnoreEvent;
 
-// 设置执行按钮事件状态
-static void resetState() {
-    _isIgnoreEvent = NO;
-}
+@end
 
 
 @implementation UIButton (YLBButtonTool)
 
 
-+ (void)load {
-    SEL originSEL = @selector(sendAction:to:forEvent:);
-    SEL mySEL = @selector(my_sendAction:to:forEvent:);
-    
-    Method originM = class_getInstanceMethod([self class], originSEL);
-    const char *typeEncodinds = method_getTypeEncoding(originM);
-    
-    Method newM = class_getInstanceMethod([self class], mySEL);
-    IMP newIMP = method_getImplementation(newM);
-    
-    if (class_addMethod([self class], mySEL, newIMP, typeEncodinds)) {
-        class_replaceMethod([self class], originSEL, newIMP, typeEncodinds);
-    } else {
-        method_exchangeImplementations(originM, newM);
-    }
-}
-
-- (void)my_sendAction:(SEL)action to:(id)target forEvent:(UIEvent *)event {
-    
-    // 保险起见，判断下Class类型
-    if ([self isKindOfClass:[UIButton class]]) {
-        
-        //1. 按钮点击间隔事件
-        self.clickDurationTime = self.clickDurationTime == 0 ? defaultDuration : self.clickDurationTime;
-        
-        //2. 是否忽略按钮点击事件
-        if (_isIgnoreEvent) {
-            //2.1 忽略按钮事件
-            return;
-        } else if(self.clickDurationTime > 0) {
-            //2.2 不忽略按钮事件
-            
-            // 后续在间隔时间内直接忽略按钮事件
-            _isIgnoreEvent = YES;
-            
-            // 间隔事件后，执行按钮事件
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(self.clickDurationTime * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                resetState();
-            });
-            
-            // 发送按钮点击消息
-            [self my_sendAction:action to:target forEvent:event];
++ (void)load{
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        SEL selA = @selector(sendAction:to:forEvent:);
+        SEL selB = @selector(mySendAction:to:forEvent:);
+        Method methodA =   class_getInstanceMethod(self,selA);
+        Method methodB = class_getInstanceMethod(self, selB);
+        //将 methodB的实现 添加到系统方法中 也就是说 将 methodA方法指针添加成 方法methodB的  返回值表示是否添加成功
+        BOOL isAdd = class_addMethod(self, selA, method_getImplementation(methodB), method_getTypeEncoding(methodB));
+        //添加成功了 说明 本类中不存在methodB 所以此时必须将方法b的实现指针换成方法A的，否则 b方法将没有实现。
+        if (isAdd) {
+            class_replaceMethod(self, selB, method_getImplementation(methodA), method_getTypeEncoding(methodA));
+        }else{
+            //添加失败了 说明本类中 有methodB的实现，此时只需要将 methodA和methodB的IMP互换一下即可。
+            method_exchangeImplementations(methodA, methodB);
         }
-        
-    } else {
-        [self my_sendAction:action to:target forEvent:event];
+    });
+}
+- (NSTimeInterval)timeInterval{
+    return [objc_getAssociatedObject(self, _cmd) doubleValue];
+}
+- (void)setTimeInterval:(NSTimeInterval)timeInterval{
+    objc_setAssociatedObject(self, @selector(timeInterval), @(timeInterval), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    
+}
+//当我们按钮点击事件 sendAction 时  将会执行  mySendAction
+- (void)mySendAction:(SEL)action to:(id)target forEvent:(UIEvent *)event{
+    if (self.isIgnore) {
+        //不需要被hook
+        [self mySendAction:action to:target forEvent:event];
+        return;
     }
+    if ([NSStringFromClass(self.class) isEqualToString:@"UIButton"]) {
+        self.timeInterval =self.timeInterval == 0 ?defaultInterval:self.timeInterval;
+        if (self.isIgnoreEvent){
+            return;
+        }else if (self.timeInterval > 0){
+            [self performSelector:@selector(resetState) withObject:nil afterDelay:self.timeInterval];
+        }
+    }
+    //此处 methodA和methodB方法IMP互换了，实际上执行 sendAction；所以不会死循环
+    self.isIgnoreEvent = YES;
+    [self mySendAction:action to:target forEvent:event];
 }
-#pragma mark - associate
-
-- (void)setClickDurationTime:(NSTimeInterval)clickDurationTime {
-    objc_setAssociatedObject(self, @selector(clickDurationTime), @(clickDurationTime), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+//runtime 动态绑定 属性
+- (void)setIsIgnoreEvent:(BOOL)isIgnoreEvent{
+    // 注意BOOL类型 需要用OBJC_ASSOCIATION_RETAIN_NONATOMIC 不要用错，否则set方法会赋值出错
+    objc_setAssociatedObject(self, @selector(isIgnoreEvent), @(isIgnoreEvent), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
-
-- (NSTimeInterval)clickDurationTime {
-    return [objc_getAssociatedObject(self, @selector(clickDurationTime)) doubleValue];
+- (BOOL)isIgnoreEvent{
+    //_cmd == @select(isIgnore); 和set方法里一致
+    return [objc_getAssociatedObject(self, _cmd) boolValue];
+}
+- (void)setIsIgnore:(BOOL)isIgnore{
+    // 注意BOOL类型 需要用OBJC_ASSOCIATION_RETAIN_NONATOMIC 不要用错，否则set方法会赋值出错
+    objc_setAssociatedObject(self, @selector(isIgnore), @(isIgnore), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+- (BOOL)isIgnore{
+    //_cmd == @select(isIgnore); 和set方法里一致
+    return [objc_getAssociatedObject(self, _cmd) boolValue];
+}
+- (void)resetState{
+    [self setIsIgnoreEvent:NO];
 }
 
 
